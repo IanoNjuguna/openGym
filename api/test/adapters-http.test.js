@@ -29,7 +29,12 @@ function fakeFetch(answers) {
     calls.push({ url, method: init.method, headers: init.headers || {}, body: init.body ? JSON.parse(init.body) : null });
     const a = typeof answers === 'function' ? answers(calls.length, url, init) : answers[Math.min(calls.length, answers.length) - 1];
     if (a instanceof Error) throw a;
-    return { ok: a.status >= 200 && a.status < 300, status: a.status, text: async () => (typeof a.body === 'string' ? a.body : JSON.stringify(a.body)) };
+    return {
+      ok: a.status >= 200 && a.status < 300,
+      status: a.status,
+      text: async () => (typeof a.body === 'string' ? a.body : JSON.stringify(a.body)),
+      headers: a.headers ? { get: k => a.headers[String(k).toLowerCase()] || null } : undefined
+    };
   };
   f.calls = calls;
   return f;
@@ -624,4 +629,53 @@ test('validateHeaders: small maps pass, framing names and junk do not', () => {
   assert.equal(validateHeaders([['a', 'b']]).ok, false);
   const many = {}; for (let i = 0; i < 9; i++) many['x-h-' + i] = 'v';
   assert.equal(validateHeaders(many).ok, false);
+});
+
+/* A slow local model cannot answer inside the five minutes Node's fetch allows a silent
+   connection, so the transport asks for SSE. These two pin the folding: deltas become the one
+   string the pipeline parses, and a stream cut off at the output limit is a truncation, not a
+   short but valid answer. */
+const sseBody = chunks => chunks.map(c => 'data: ' + JSON.stringify(c) + '\n\n').join('') + 'data: [DONE]\n\n';
+const SSE_TYPE = 'text/event-stream';
+
+test('an SSE answer is folded into one string and the request asks for a stream', async () => {
+  const f = fakeFetch([{
+    status: 200,
+    headers: { 'content-type': SSE_TYPE },
+    body: sseBody([
+      { choices: [{ delta: { role: 'assistant' }, index: 0 }] },
+      { choices: [{ delta: { content: '{"coach_contract":1,' }, index: 0 }] },
+      { choices: [{ delta: { content: '"answer":"rest"}' }, index: 0 }] },
+      { choices: [{ delta: {}, finish_reason: 'stop', index: 0 }] }
+    ])
+  }]);
+  const r = await compatible.invoke({ cfg: cfgCompat, prompt: 'P', env: {}, model: 'llama3', fetch: f });
+  assert.equal(r.code, 0);
+  assert.equal(r.text, '{"coach_contract":1,"answer":"rest"}');
+  assert.equal(f.calls[0].body.stream, true, 'the request asks for a stream');
+});
+
+test('an SSE answer cut off at the output limit is reported as truncated, not as an answer', async () => {
+  const f = fakeFetch([{
+    status: 200,
+    headers: { 'content-type': SSE_TYPE },
+    body: sseBody([
+      { choices: [{ delta: { content: '{"coach_contract":1,' }, index: 0 }] },
+      { choices: [{ delta: {}, finish_reason: 'length', index: 0 }] }
+    ])
+  }]);
+  const r = await compatible.invoke({ cfg: cfgCompat, prompt: 'P', env: {}, model: 'llama3', fetch: f });
+  assert.equal(r.code, 1);
+  assert.match(r.stderr, /cut off at the output limit/);
+});
+
+test('an error frame in the stream ends the job as an error, not as a short answer', async () => {
+  const f = fakeFetch([{
+    status: 200,
+    headers: { 'content-type': SSE_TYPE },
+    body: 'data: {"error":{"message":"model ran out of memory"}}\n\n'
+  }]);
+  const r = await compatible.invoke({ cfg: cfgCompat, prompt: 'P', env: {}, model: 'llama3', fetch: f });
+  assert.equal(r.code, 1);
+  assert.match(r.stderr, /ran out of memory/);
 });
