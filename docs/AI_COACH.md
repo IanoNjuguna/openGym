@@ -92,10 +92,13 @@ It answers on `http://localhost:11434`, and `curl -s http://localhost:11434/v1/m
 the alias to pick in the Coach. In the admin card choose **QVAC (local)**, leave the key empty,
 **Test the Coach**, then pick the model from the list.
 
-A 4B model at Q4 is about 2.7 GB and needs to fit in memory alongside the rest of your machine.
-It is slower than a cloud API by a wide margin: on a four-thread laptop a question takes a
-couple of minutes and a full plan can take twenty. The Coach gives a local endpoint 25 minutes
-instead of the 5 a cloud provider gets, and its typing bubble stops promising "a minute or two".
+A 4B model at Q4 is about 2.7 GB and needs to fit in memory alongside the rest of your machine, and
+a 2B is about half that. It is slower than a cloud API by a wide margin, and the thing to budget
+for is the payload, not the answer. Measured on a 2016 four-thread laptop with no usable GPU:
+reading a 2,571-token question took 347 seconds at 7.4 tokens per second of prefill, and a 4B then
+generated at 1.6 tokens per second. That machine cannot run this workload. A modern laptop, or any
+machine with a real GPU, is a different story, and worth measuring before you promise anybody a
+demo.
 
 ## Turning it on
 
