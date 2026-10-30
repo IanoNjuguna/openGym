@@ -18,6 +18,13 @@ import { fetchFor } from './node-fetch.js';
 
 const INTERVAL_MS = 30 * 60000;
 const TIMEOUT_MS = 10 * 60000;
+// A model on a CPU can need minutes just to read one prefix, and a llama.cpp server decodes one
+// request at a time, so a warmup that slow warms nothing: it holds the only slot a real job could
+// be using, and a request that arrives behind it dies at the client's five-minute wall. Measured
+// on a 2016 dual-core: 510 s for one kind, while the person who asked a question in the app got
+// their failure six minutes later. After one pass that slow, warmups stop for this process.
+const SLOW_MS = 120000;
+const state = { tooSlow: false };
 // The two kinds a chat runs day to day; `create` happens once per user and may pay cold.
 // Review is deliberately LAST: with OLLAMA_NUM_PARALLEL=1 there is one live slot, it belongs
 // to whatever ran most recently, and the fallback restore from the prompt cache is not
@@ -27,11 +34,13 @@ const KINDS = ['debrief', 'review'];
 
 let running = false;
 
-export async function warmOnce({ log = console, fetch: fetchImpl } = {}) {
+export async function warmOnce({ log = console, fetch: fetchImpl, slowMs = SLOW_MS, state: st = state } = {}) {
   const cfg = cfgStore.load();
   // Any local endpoint warms the same way: the model has to be resident, or the first real job
   // pays the cold start. `isLocalProvider` rather than a name, so a new local row gets it free.
   if (!cfgStore.isEnabled() || !isLocalProvider(cfg.provider)) return { skipped: true };
+  // A machine that already proved it is too slow to warm gets left alone.
+  if (st.tooSlow) return { skipped: true };
   const adapter = adapterFor(cfg.provider);
   if (!adapter || adapter.spawns !== false) return { skipped: true };
   if (running) return { skipped: true };
@@ -55,6 +64,14 @@ export async function warmOnce({ log = console, fetch: fetchImpl } = {}) {
       }
       // >5s means the prefix was actually (re)read — worth a line; a warm ping is noise.
       if (ms > 5000) log.log(`coach warmup (${kind}): prefix cached in ${Math.round(ms / 1000)}s`);
+      // Past the slow threshold this stops being a favour. Give the slot back and stop trying:
+      // the second kind would take just as long, and every minute of it is a minute a real
+      // question from somebody's phone would spend queued behind it.
+      if (ms > slowMs) {
+        st.tooSlow = true;
+        log.log(`coach warmup (${kind}): too slow to be worth it on this machine (${Math.round(ms / 1000)}s); no more warmups`);
+        return { ok: true, slow: true };
+      }
     }
     return { ok: true };
   } finally {
