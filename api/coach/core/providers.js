@@ -42,10 +42,34 @@ export const HTTP_PROVIDERS = Object.freeze({
     defaultBase: null, baseUrl: true, keyOptional: true,
     defaultModel: null,
     keyPlaceholder: '(optional)'
+  }),
+  // A model on the owner's own machine, served by QVAC (`qvac serve --openai`). Same wire shape
+  // as `compatible` and the same optional key, but with the address already filled in, because
+  // a person who just installed QVAC should not have to know the port. The model comes from
+  // whatever that server lists: QVAC answers /v1/models with the aliases in its own config.
+  qvac: Object.freeze({
+    label: 'QVAC (local)', runtime: 'HTTPS', http: true, local: true,
+    apiKeyEnv: 'QVAC_API_KEY', oauthEnv: null,
+    defaultBase: 'http://localhost:11434', baseUrl: true, keyOptional: true,
+    defaultModel: null,
+    keyPlaceholder: '(none)'
   })
 });
 
 export const HTTP_PROVIDER_IDS = Object.freeze(Object.keys(HTTP_PROVIDERS));
+
+/**
+ * Whether this provider is expected to be a model on the user's own machine or network.
+ *
+ * Four places used to spell this as `provider === 'compatible'` — the long timeout, the warmup,
+ * the consent copy and the "running locally" line in the chat — and each of them would have
+ * quietly done the wrong thing for the next local provider added. One predicate, read from the
+ * table above, so a row that says `local: true` is the only thing to change.
+ */
+export function isLocalProvider(id) {
+  const meta = HTTP_PROVIDERS[id];
+  return !!(meta && (meta.local || id === 'compatible'));
+}
 
 /** The base URL a provider will actually be called at: the configured override, else the default. */
 export function baseUrlFor(id, cfg) {

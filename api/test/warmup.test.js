@@ -34,3 +34,28 @@ test('warmup pings the compatible endpoint once per chat kind, with the real rul
   cfgStore.save({ provider: 'anthropic' });
   assert.equal((await warmOnce({ log: quiet, fetch: fakeFetch })).skipped, true, 'cloud providers are never pinged');
 });
+
+/* A slow local model and a single decode slot: a warmup that takes minutes holds the slot a real
+   question needs, and the person who asked one gets a failure instead of an answer. Measured on a
+   2016 dual-core laptop, one warmup kind took 510 s while a chat request died at 301 s. */
+test('a warmup too slow to be worth it stops after the first kind and then stops entirely', async t => {
+  cfgStore.reset();
+  cfgStore.save({ enabled: true, provider: 'compatible', models: { compatible: 'm1' }, providerOptions: { compatible: { baseUrl: 'http://ollama.test:11434' } } });
+  t.after(() => cfgStore.reset());
+  const seen = [];
+  const slowFetch = async (url, init) => {
+    seen.push(JSON.parse(init.body));
+    await new Promise(r => setTimeout(r, 5));
+    return new Response(JSON.stringify({ choices: [{ message: { content: '{"coach_contract":1}' }, finish_reason: 'stop' }] }), { status: 200 });
+  };
+  const quiet = { log: () => {} };
+  const st = { tooSlow: false };
+
+  const r = await warmOnce({ log: quiet, fetch: slowFetch, slowMs: 1, state: st });
+  assert.deepEqual(r, { ok: true, slow: true });
+  assert.equal(seen.length, 1, 'the second kind is not attempted: it would hold the slot just as long');
+  assert.equal(st.tooSlow, true);
+
+  assert.equal((await warmOnce({ log: quiet, fetch: slowFetch, slowMs: 1, state: st })).skipped, true, 'and a machine that proved it is too slow is left alone');
+  assert.equal(seen.length, 1);
+});

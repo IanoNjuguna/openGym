@@ -20,6 +20,7 @@ rest of this document applies to you.
 | **OpenAI API** | plain HTTPS to `api.openai.com` | an API key | default |
 | **Google Gemini** | plain HTTPS to `generativelanguage.googleapis.com` | an API key | default |
 | **OpenAI-compatible endpoint** | plain HTTPS to a URL you give it — Ollama, LM Studio, vLLM, OpenRouter, a gateway of your own | an API key, optional | default |
+| **QVAC (local)** | plain HTTPS to a QVAC server on your own machine, `http://localhost:11434` unless you moved it | no key | default |
 | **Claude (Anthropic)** | the Claude Agent SDK, inside the container | a `claude setup-token` | `coach` |
 | **Codex (OpenAI)** | the Codex CLI, inside the container | Codex's own device sign-in | `coach` |
 
@@ -32,6 +33,94 @@ A model on your own LAN is the compatible endpoint with no key: point it at
 `http://ollama.lan:11434` and pick a model from the list it serves. That is the whole
 configuration. (On the server, that is. The phone app's own-key Coach needs `https://`; see
 [On the phone](#on-the-phone).)
+
+### A model on your own machine with QVAC
+
+[QVAC](https://qvac.tether.io) is Tether's local AI stack. It runs a model on hardware you
+control, and its server speaks the same OpenAI Chat Completions shape the Coach already talks,
+so the Coach row for it is a preset rather than a new integration: the address is filled in, no
+key is asked for, and the model comes from whatever that server lists.
+
+Install the CLI and start a model:
+
+```bash
+npm install -g @qvac/cli
+```
+
+Create `qvac.config.json` next to where you will run it. The three settings below are the ones
+that matter and each of them is a failure the Coach shows you, so read the comments:
+
+```json
+{
+  "serve": {
+    "models": {
+      "coach-model": {
+        "model": "QWEN3_4B_INST_Q4_K_M",
+        "preload": true,
+        "config": {
+          "device": "cpu",
+          "ctx_size": 16384,
+          "reasoning_budget": 0
+        }
+      }
+    }
+  }
+}
+```
+
+- `device: "cpu"` on a machine whose only Vulkan device is a software rasterizer. QVAC will
+  otherwise offload layers to it and every completion fails with an internal error.
+- `ctx_size: 16384` because QVAC defaults to 1024. A question to the Coach is about 3,000
+  tokens of payload and a plan can be several thousand back, so the default truncates the
+  answer mid-JSON and burns the repair round instead of failing loudly.
+- `reasoning_budget: 0` because Qwen3 and similar models write their thinking into the answer,
+  and the Coach expects one JSON object and nothing else.
+
+`@qvac/sdk` has to resolve next to the CLI, or every model name is rejected as unknown:
+
+```bash
+mkdir -p qvac-coach && cd qvac-coach && npm init -y && npm install @qvac/cli @qvac/sdk
+```
+
+Then:
+
+```bash
+qvac serve --openai
+```
+
+It answers on `http://localhost:11434`, and `curl -s http://localhost:11434/v1/models` tells you
+the alias to pick in the Coach. In the admin card choose **QVAC (local)**, leave the key empty,
+**Test the Coach**, then pick the model from the list.
+
+A 4B model at Q4 is about 2.7 GB and needs to fit in memory alongside the rest of your machine, and
+a 2B is about half that. It is slower than a cloud API by a wide margin, and the thing to budget
+for is the payload, not the answer. Measured on a 2016 four-thread laptop with no usable GPU:
+reading a 2,571-token question took 347 seconds at 7.4 tokens per second of prefill, and a 4B then
+generated at 1.6 tokens per second. That machine cannot run this workload. A modern laptop, or any
+machine with a real GPU, is a different story, and worth measuring before you promise anybody a
+demo.
+
+#### When it does not work
+
+Each of these is a failure worth recognising, because none of them looks like what it is.
+
+- **Every completion fails with an internal error, immediately.** QVAC offloaded layers to a Vulkan
+  device that is Mesa's llvmpipe software rasterizer. Set `"device": "cpu"` in the model config. It
+  reads as a broken model, not a broken GPU.
+- **The answer arrives cut off, or as broken JSON.** `ctx_size` is still QVAC's 1024 default, so the
+  prompt itself was truncated. A question payload is about 2,600 tokens; a plan is over 5,000.
+- **The answer opens with a block of reasoning instead of the JSON.** Set `reasoning_budget: 0`. The
+  Coach reads one JSON object and nothing else, and a thinking trace breaks the parse.
+- **"The Coach couldn't run. The instance owner needs to check its setup."** That is the job's
+  provider error after the job budget expired. The default is five minutes; raise
+  `COACH_JOB_TIMEOUT_MS` in `.env` (it wins over the job's own default) if the machine deserves
+  longer. On a slow CPU it can still be the honest answer that the machine cannot do it.
+- **Everything fails after one interrupted request.** QVAC decodes one request at a time, and a
+  client that gives up leaves the slot cancelling. Restart `qvac serve`, and kill the leftover
+  `bare` worker process too, because it outlives its parent and keeps the whole model in memory.
+- **A warmup that takes minutes.** This app warms local endpoints so nobody pays a cold start, but
+  on a machine this slow the warmup holds the only decode slot a real question needs. It now gives
+  up after one pass slower than two minutes and says so in the log.
 
 ## Turning it on
 
@@ -353,6 +442,15 @@ prompt once — so
 HTTP client waits as long as the job, and the chat says "this can take a while" rather than
 promising minutes when the endpoint is a local one. The phone's BYOK mode does the same on
 its own: a local endpoint gets 25 minutes there.
+
+Two client-side limits sit underneath that budget, and neither is the job's own timeout. Node's
+fetch abandons a connection that has said nothing for five minutes, and it abandons a response
+stream that goes quiet for five minutes too. A model that needs longer than that just to read the
+prompt therefore fails as `could not reach …` or `could not read the stream …: terminated`,
+whatever `COACH_JOB_TIMEOUT_MS` says. Measured on a 2016 dual-core laptop: 347 seconds to read a
+2,571-token question, which is past both limits before the model has written a word. Streaming
+answers the first of the two, because the headers arrive as soon as generation starts, but it
+cannot help with a prefill that is itself silent for longer than five minutes.
 
 The Coach may only touch **routines and the week**. Your training log, your weigh-ins and your
 settings are not reachable from any change type that exists.

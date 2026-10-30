@@ -21,11 +21,12 @@ import * as payloadLib from '../../../api/coach/core/payload.js'
 import { runPipeline } from '../../../api/coach/core/pipeline.js'
 import { waitingProposal } from '../../../api/coach/core/pending.js'
 import { isDue } from '../../../api/coach/core/due.js'
-import { HTTP_PROVIDERS, baseUrlFor } from '../../../api/coach/core/providers.js'
+import { HTTP_PROVIDERS, baseUrlFor, isLocalProvider } from '../../../api/coach/core/providers.js'
 import anthropic from '../../../api/coach/core/adapters/anthropic.js'
 import openai from '../../../api/coach/core/adapters/openai.js'
 import gemini from '../../../api/coach/core/adapters/gemini.js'
 import compatible from '../../../api/coach/core/adapters/compatible.js'
+import qvac from '../../../api/coach/core/adapters/qvac.js'
 import { modelSubstitute } from '../../../api/coach/core/adapters/http.js'
 import { nativeFetch } from './capacitor-fetch.js'
 import { getApiKey } from './coach-secrets.js'
@@ -34,12 +35,12 @@ import { planHash } from './coach.js'
 import { todayISO } from './format.js'
 import { t, getLang } from './i18n.js'
 
-export const ADAPTERS = { anthropic, openai, gemini, compatible }
-// Five minutes is right for a cloud API and wrong for a model on somebody's laptop; the
-// OpenAI-compatible endpoint is the one that may be local, so it gets the long budget.
+export const ADAPTERS = { anthropic, openai, gemini, compatible, qvac }
+// Five minutes is right for a cloud API and wrong for a model on somebody's laptop; a local
+// endpoint is the one that may be slow, so it gets the long budget.
 export const TIMEOUT_MS = 5 * 60000
 export const LOCAL_ENDPOINT_TIMEOUT_MS = 25 * 60000
-export const timeoutFor = provider => (provider === 'compatible' ? LOCAL_ENDPOINT_TIMEOUT_MS : TIMEOUT_MS)
+export const timeoutFor = provider => (isLocalProvider(provider) ? LOCAL_ENDPOINT_TIMEOUT_MS : TIMEOUT_MS)
 const PENDING_DAYS = 14
 const HANDLE_LENGTH = 16
 

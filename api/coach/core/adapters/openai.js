@@ -11,6 +11,10 @@ export function chatCompletionsSpec(id, { maxTokensField = 'max_completion_token
   return {
     id,
     versionlessFallback,
+    // Ask for SSE. A local model can take minutes to its first byte and Node's fetch abandons a
+    // silent connection at five minutes, so a buffered answer from a slow box never arrives at
+    // all. The transport folds the stream back into one string, which is what the pipeline wants.
+    sse: true,
     path: () => '/v1/chat/completions',
     modelsPath: '/v1/models',
     headers: key => (key ? { authorization: 'Bearer ' + key } : {}),

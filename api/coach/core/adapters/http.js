@@ -41,6 +41,35 @@ const hostOf = url => { try { return new URL(url).host; } catch { return url; } 
 const schemeOf = url => { try { return new URL(url).protocol === 'http:' ? 'HTTP' : 'HTTPS'; } catch { return 'HTTPS'; } };
 const trim = (s, n = 300) => String(s == null ? '' : s).slice(0, n);
 
+/**
+ * Fold a Chat Completions SSE body into the one string the pipeline expects.
+ *
+ * Only `choices[0].delta.content` is kept, because that is the answer itself; role-only chunks
+ * and `[DONE]` carry nothing. An error frame ends it as an error rather than as a short answer,
+ * and `finish_reason: "length"` is the streamed spelling of a truncated answer, which the caller
+ * turns into the same message the buffered path gives.
+ */
+export function collectSSE(raw) {
+  let text = '';
+  let truncated = false;
+  let error = null;
+  for (const line of String(raw == null ? '' : raw).split(/\r?\n/)) {
+    const m = /^data:\s?(.*)$/.exec(line);
+    if (!m) continue;
+    const payload = m[1].trim();
+    if (!payload || payload === '[DONE]') continue;
+    let evt;
+    try { evt = JSON.parse(payload); } catch { continue; }
+    if (evt && evt.error) { error = (evt.error.message || evt.error) + ''; continue; }
+    const choice = evt && Array.isArray(evt.choices) ? evt.choices[0] : null;
+    if (!choice) continue;
+    const d = choice.delta || {};
+    if (typeof d.content === 'string') text += d.content;
+    if (choice.finish_reason === 'length') truncated = true;
+  }
+  return { text, truncated, error: error || null };
+}
+
 // A base that already names its API version (OpenRouter's …/api/v1, Zhipu's …/paas/v4, Gemini's
 // …/v1beta/openai) is the whole prefix, so the spec's own leading version is dropped instead of
 // doubled into …/v4/v1/chat/completions (#437). A bare host still gets the spec's version.
@@ -208,6 +237,11 @@ export function httpAdapter(spec) {
       let chosen = substitutes.get(substituteKey(id, base, asked)) || asked;
 
       let body = spec.body({ model: chosen, prompt, system: system || null, schema: schema || null, maxTokens });
+      // A model on a CPU can spend minutes before its first byte, and Node's fetch abandons a
+      // silent connection after five minutes whatever timeout the Coach asked for. Asking for
+      // SSE means the headers arrive as soon as generation starts, so the wall stops existing
+      // for a slow local endpoint without any provider getting a longer leash than before.
+      if (spec.sse) body = { ...body, stream: true };
       let triedOtherModel = false;
       let retriedWithStrictSchema = false;
       let retriedWithoutJsonMode = false;
@@ -223,6 +257,21 @@ export function httpAdapter(spec) {
         } catch (e) {
           if (e.name === 'AbortError') return { code: -1, text: '', stderr: 'timed out', timedOut: true };
           return { code: 1, text: '', stderr: `could not reach ${hostOf(base)}: ${trim(e.message, 200)}` };
+        }
+        // An SSE answer is read to the end and folded back into one string: the pipeline wants
+        // the model's whole output, not the pattern it arrived in. Only specs that ask for it
+        // (`sse: true`) and endpoints that answer as a stream take this path.
+        const ctype = spec.sse && res.headers && typeof res.headers.get === 'function' ? res.headers.get('content-type') || '' : '';
+        if (res.ok && /text\/event-stream/i.test(ctype)) {
+          let raw = '';
+          try { raw = await res.text(); } catch (e) {
+            return { code: 1, text: '', stderr: `could not read the stream from ${hostOf(base)}: ${trim(e.message, 120)}` };
+          }
+          const acc = collectSSE(raw);
+          if (acc.error) return { code: 1, text: '', stderr: acc.error };
+          if (acc.truncated) return { code: 1, text: '', stderr: 'the answer was cut off at the output limit; try a smaller plan or a bigger model' };
+          if (!acc.text.trim()) return { code: 1, text: '', stderr: 'the stream carried no answer' };
+          return { code: 0, text: acc.text.trim(), stderr: '', ...(chosen !== asked ? { model: chosen } : {}) };
         }
         const { data, text } = await readJson(res);
         if (!res.ok) {

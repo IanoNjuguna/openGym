@@ -32,6 +32,7 @@ import {
 } from '../lib/coach.js'
 import { insightsFor, sessionInsights } from '../lib/coach-insights.js'
 import { useCoachStatus, requestReview, requestDebrief, requestPlan, refinePlan, askCoach, resolvePending, cohortStats, setCohortShare, jobErrorText, awaitedJob, settleAwaited, JOB_ERRORS, ensureAiConsent, isDeclined } from '../lib/coach-api.js'
+import { isLocalProvider } from '../../../api/coach/core/providers.js'
 import { AiConsentSection } from '../components/CoachConsentSheet.jsx'
 import { useCoachGate } from '../lib/use-coach-gate.js'
 import { confirmSheet } from '../sheets.jsx'
@@ -298,9 +299,9 @@ const stamp = at => {
 
 function Typing({ S, kind, coachLocal, config }) {
   const ms = estimateMs(S)
-  // "Local" on either side: the phone's own OpenAI-compatible endpoint, or the server's —
-  // /api/config names the provider, and a model on the owner's box is nothing like a cloud API.
-  const local = (coachLocal?.mode === 'byok' && coachLocal?.provider === 'compatible') || config?.coach?.provider === 'compatible'
+  // "Local" on either side: the phone's own local endpoint, or the server's — /api/config names
+  // the provider, and a model on the owner's box is nothing like a cloud API.
+  const local = (coachLocal?.mode === 'byok' && isLocalProvider(coachLocal?.provider)) || isLocalProvider(config?.coach?.provider)
   let eta
   if (ms) {
     const min = Math.round(ms / 60000)
