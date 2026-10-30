@@ -20,6 +20,7 @@ rest of this document applies to you.
 | **OpenAI API** | plain HTTPS to `api.openai.com` | an API key | default |
 | **Google Gemini** | plain HTTPS to `generativelanguage.googleapis.com` | an API key | default |
 | **OpenAI-compatible endpoint** | plain HTTPS to a URL you give it — Ollama, LM Studio, vLLM, OpenRouter, a gateway of your own | an API key, optional | default |
+| **QVAC (local)** | plain HTTPS to a QVAC server on your own machine, `http://localhost:11434` unless you moved it | no key | default |
 | **Claude (Anthropic)** | the Claude Agent SDK, inside the container | a `claude setup-token` | `coach` |
 | **Codex (OpenAI)** | the Codex CLI, inside the container | Codex's own device sign-in | `coach` |
 
@@ -32,6 +33,69 @@ A model on your own LAN is the compatible endpoint with no key: point it at
 `http://ollama.lan:11434` and pick a model from the list it serves. That is the whole
 configuration. (On the server, that is. The phone app's own-key Coach needs `https://`; see
 [On the phone](#on-the-phone).)
+
+### A model on your own machine with QVAC
+
+[QVAC](https://qvac.tether.io) is Tether's local AI stack. It runs a model on hardware you
+control, and its server speaks the same OpenAI Chat Completions shape the Coach already talks,
+so the Coach row for it is a preset rather than a new integration: the address is filled in, no
+key is asked for, and the model comes from whatever that server lists.
+
+Install the CLI and start a model:
+
+```bash
+npm install -g @qvac/cli
+```
+
+Create `qvac.config.json` next to where you will run it. The three settings below are the ones
+that matter and each of them is a failure the Coach shows you, so read the comments:
+
+```json
+{
+  "serve": {
+    "models": {
+      "coach-model": {
+        "model": "QWEN3_4B_INST_Q4_K_M",
+        "preload": true,
+        "config": {
+          "device": "cpu",
+          "ctx_size": 16384,
+          "reasoning_budget": 0
+        }
+      }
+    }
+  }
+}
+```
+
+- `device: "cpu"` on a machine whose only Vulkan device is a software rasterizer. QVAC will
+  otherwise offload layers to it and every completion fails with an internal error.
+- `ctx_size: 16384` because QVAC defaults to 1024. A question to the Coach is about 3,000
+  tokens of payload and a plan can be several thousand back, so the default truncates the
+  answer mid-JSON and burns the repair round instead of failing loudly.
+- `reasoning_budget: 0` because Qwen3 and similar models write their thinking into the answer,
+  and the Coach expects one JSON object and nothing else.
+
+`@qvac/sdk` has to resolve next to the CLI, or every model name is rejected as unknown:
+
+```bash
+mkdir -p qvac-coach && cd qvac-coach && npm init -y && npm install @qvac/cli @qvac/sdk
+```
+
+Then:
+
+```bash
+qvac serve --openai
+```
+
+It answers on `http://localhost:11434`, and `curl -s http://localhost:11434/v1/models` tells you
+the alias to pick in the Coach. In the admin card choose **QVAC (local)**, leave the key empty,
+**Test the Coach**, then pick the model from the list.
+
+A 4B model at Q4 is about 2.7 GB and needs to fit in memory alongside the rest of your machine.
+It is slower than a cloud API by a wide margin: on a four-thread laptop a question takes a
+couple of minutes and a full plan can take twenty. The Coach gives a local endpoint 25 minutes
+instead of the 5 a cloud provider gets, and its typing bubble stops promising "a minute or two".
 
 ## Turning it on
 
