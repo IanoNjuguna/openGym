@@ -421,6 +421,15 @@ HTTP client waits as long as the job, and the chat says "this can take a while" 
 promising minutes when the endpoint is a local one. The phone's BYOK mode does the same on
 its own: a local endpoint gets 25 minutes there.
 
+Two client-side limits sit underneath that budget, and neither is the job's own timeout. Node's
+fetch abandons a connection that has said nothing for five minutes, and it abandons a response
+stream that goes quiet for five minutes too. A model that needs longer than that just to read the
+prompt therefore fails as `could not reach …` or `could not read the stream …: terminated`,
+whatever `COACH_JOB_TIMEOUT_MS` says. Measured on a 2016 dual-core laptop: 347 seconds to read a
+2,571-token question, which is past both limits before the model has written a word. Streaming
+answers the first of the two, because the headers arrive as soon as generation starts, but it
+cannot help with a prefill that is itself silent for longer than five minutes.
+
 The Coach may only touch **routines and the week**. Your training log, your weigh-ins and your
 settings are not reachable from any change type that exists.
 
