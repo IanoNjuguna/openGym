@@ -100,6 +100,28 @@ generated at 1.6 tokens per second. That machine cannot run this workload. A mod
 machine with a real GPU, is a different story, and worth measuring before you promise anybody a
 demo.
 
+#### When it does not work
+
+Each of these is a failure worth recognising, because none of them looks like what it is.
+
+- **Every completion fails with an internal error, immediately.** QVAC offloaded layers to a Vulkan
+  device that is Mesa's llvmpipe software rasterizer. Set `"device": "cpu"` in the model config. It
+  reads as a broken model, not a broken GPU.
+- **The answer arrives cut off, or as broken JSON.** `ctx_size` is still QVAC's 1024 default, so the
+  prompt itself was truncated. A question payload is about 2,600 tokens; a plan is over 5,000.
+- **The answer opens with a block of reasoning instead of the JSON.** Set `reasoning_budget: 0`. The
+  Coach reads one JSON object and nothing else, and a thinking trace breaks the parse.
+- **"The Coach couldn't run. The instance owner needs to check its setup."** That is the job's
+  provider error after the job budget expired. The default is five minutes; raise
+  `COACH_JOB_TIMEOUT_MS` in `.env` (it wins over the job's own default) if the machine deserves
+  longer. On a slow CPU it can still be the honest answer that the machine cannot do it.
+- **Everything fails after one interrupted request.** QVAC decodes one request at a time, and a
+  client that gives up leaves the slot cancelling. Restart `qvac serve`, and kill the leftover
+  `bare` worker process too, because it outlives its parent and keeps the whole model in memory.
+- **A warmup that takes minutes.** This app warms local endpoints so nobody pays a cold start, but
+  on a machine this slow the warmup holds the only decode slot a real question needs. It now gives
+  up after one pass slower than two minutes and says so in the log.
+
 ## Turning it on
 
 Nothing here is an environment variable or a restart — the whole point of the admin card is that

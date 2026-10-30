@@ -60,6 +60,20 @@ Only if you turn it on. The default install calls no AI service. Two optional pi
 change needs your approval) and the [MCP server](../mcp/README.md), which lets an AI client on your
 computer read your history. Neither is needed for anything else in the app.
 
+### Can the coach run on a model on my own machine?
+
+Yes, and it needs no cloud account at all. [QVAC](https://qvac.tether.io) serves a local model over
+an OpenAI-compatible API, and the Coach has a preset for it: **Settings → Account → Admin
+dashboard**, the AI Coach card, **QVAC (local)**, and leave the key empty. The setup, the three
+settings that decide whether it works, and an honest account of how slow it is:
+[AI_COACH.md](AI_COACH.md#a-model-on-your-own-machine-with-qvac).
+
+How fast it is depends entirely on the machine, and it is worth measuring before promising anybody
+a demo. The Coach's own rules are about 9 kB of system prompt on every request, so reading one
+question is a few thousand tokens. A 4B on an older CPU reads at single-digit tokens per second,
+which means minutes before the first word, and a plan much longer. A modern laptop or any real GPU
+is one to two orders of magnitude faster.
+
 ### My passkey sign-in doesn't work.
 
 Almost always one of two things:
