@@ -12,6 +12,7 @@
  */
 import * as cfgStore from './config.js';
 import { adapterFor } from './adapters/index.js';
+import { isLocalProvider } from './core/providers.js';
 import { buildPromptParts } from './core/prompt.js';
 import { fetchFor } from './node-fetch.js';
 
@@ -28,7 +29,9 @@ let running = false;
 
 export async function warmOnce({ log = console, fetch: fetchImpl } = {}) {
   const cfg = cfgStore.load();
-  if (!cfgStore.isEnabled() || cfg.provider !== 'compatible') return { skipped: true };
+  // Any local endpoint warms the same way: the model has to be resident, or the first real job
+  // pays the cold start. `isLocalProvider` rather than a name, so a new local row gets it free.
+  if (!cfgStore.isEnabled() || !isLocalProvider(cfg.provider)) return { skipped: true };
   const adapter = adapterFor(cfg.provider);
   if (!adapter || adapter.spawns !== false) return { skipped: true };
   if (running) return { skipped: true };

@@ -17,6 +17,7 @@ import { DAYN } from '../lib/format.js'
 import { EXDB } from '../lib/exercises.js'
 import { emptyCoach, coachAvailable, hasConsent, CONSENT_VERSION, CATEGORY_TEXT, appendChat, defaultTrainingDays } from '../lib/coach.js'
 import { requestPlan, disclosure, JOB_ERRORS, isDeclined, coachVia } from '../lib/coach-api.js'
+import { isLocalProvider } from '../../../api/coach/core/providers.js'
 import { consentTarget, allowAi } from '../lib/coach-consent.js'
 import { DEMO } from '../lib/demo.js'
 import { useCoachGate } from '../lib/use-coach-gate.js'
@@ -271,7 +272,7 @@ function Consent({ onAgree, onDecline }) {
   useEffect(() => { disclosure().then(setInfo).catch(() => {}) }, [])
   const who = info?.payer === 'you'
     ? t('Sent straight to {0} with your own API key. You pay for every request.', info.host || info.providerLabel)
-    : t('Sent to {0}, running on this server under the instance owner’s account.', (info?.provider === 'compatible' && info.host) || info?.providerLabel || config?.coach?.providerLabel || t('the configured AI provider'))
+    : t('Sent to {0}, running on this server under the instance owner’s account.', (isLocalProvider(info?.provider) && info.host) || info?.providerLabel || config?.coach?.providerLabel || t('the configured AI provider'))
   return <>
     <div className="ob-eyebrow">{t('Before we start')}</div>
     <h1 className="ob-h">{t('Meet the Coach')}</h1>
